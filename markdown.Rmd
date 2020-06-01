@@ -1,0 +1,499 @@
+---
+title: "Did it rain in Seattle?"
+author: "Rand"
+date: "5/29/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Intorduction
+
+This project aims to analyze the "Did it rain in Seattle" data set.
+
+The original data set includes 25548 observations representing  daily rainfall patterns in Seattle from January 1, 1948, to December 12, 2017, with five columns:
+
+- DATE: The date yyyy-mm-dd.
+- PRCP: Precipitation, in inches.
+- TMAX: The highest temperature recorded on that day, in degrees Fahrenheit.
+- TMIN: The lowest temperature recorded on that day, in degrees Fahrenheit.
+- RAIN: TRUE if it has rained, FALSE if it has not.
+
+
+The goal of the analysis is to predict whether it will rain on a specific day based on the expected TMAX, TMIN, and date. This means that this is a supervised classification problem with two classes (Rain, Not rain).
+
+The steps of the analysis:
+
+1- Exploring the relationship between predictors (TMAX, TMIN, month) and outcome.
+
+2- Trying different machine learning classification algorithms (KNN, Regression trees, Random forests) to make predictions.
+
+3- Choosing the optimum model based on the highest Accuracy.
+
+The dataset was downloaded from Kaggle: https://www.kaggle.com/rtatman/did-it-rain-in-seattle-19482017
+It was compiled by NOAA and is in the public domain.
+
+Loading required libraries and rain dataset and turning it into a dataframe object:
+
+```{r libraries, message=FALSE}
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(lubridate)) install.packages("lubridate", repos = "http://cran.us.r-project.org")
+load("./rain.rda")
+rain <- as.data.frame(rain)
+
+```
+
+
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+
+
+
+## Analysis
+
+### Wrangling data:
+
+Adding a separate column for month parsed from the DATE column, raining column which is of class factor to indicate if it rained or not and selecting relevant columns for the analysis.
+
+```{r}
+rain <- rain %>% mutate(month = month(DATE), year = year(DATE),
+                        raini = ifelse(RAIN== TRUE, "YES", "NO"), 
+                        Rained = as.factor(raini)) %>%
+  select(-raini) %>% select(-PRCP)
+```
+
+We are examining prevalence to ensure a balanced data set. At first, we notice the presence of NA values.
+
+```{r prevelance1}
+mean(rain$RAIN) 
+
+``` 
+
+The number of NA values present in the dataset is 3. Since their number is very low compared to the number of rows in the dataset, they are unexpected to affect the analysis, so they are removed.
+
+```{r NAs}
+sum(is.na(rain$RAIN))
+rain<- na.omit(rain)
+```
+
+The prevalence after removing NAs is:
+
+```{r prevelance2}
+mean(rain$RAIN)
+
+```
+
+The prevalence indicates that our dataset is balanced, justifying using Accuracy to assess models' performances.
+
+Lets split the data into training set and testing set using typical (80/20) percentage. There is no reason to split it otherwise.
+
+```{r split}
+suppressWarnings(set.seed(1998, sample.kind = "Rounding"))
+test_index <- createDataPartition(rain$Rained, times = 1, p = 0.2, list = FALSE)
+test_set <- rain[test_index, ]
+train_set <- rain[-test_index, ]
+```
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+
+
+
+### Exploratory Data Visualization:
+
+We have three predictors in the data set: TMAX, TMIN, and month.
+Let's examine whether there is a relationship between each of them and the classes:
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+
+First, The month versus the number of rainy days in that month across the years:
+&nbsp;
+
+
+```{r months, echo = FALSE}
+train_set %>% group_by(month) %>%
+  summarize(sum = sum(RAIN)) %>%
+  ggplot(aes(month, sum))+ geom_line() + xlab("Month of the year")+
+  ylab("Number of rainy days") 
+
+```
+
+
+&nbsp;
+
+&nbsp;
+
+
+
+We notice that it rained more days in the winter (Jan, Dec) than summer (Jul, Aug).
+
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+
+
+Second, The minimum tempreture versus the number of rainy days:
+
+&nbsp;
+
+
+```{r TMIN, echo = FALSE}
+train_set %>% group_by(TMIN) %>%
+  summarize(sum = sum(RAIN)) %>%
+  ggplot(aes(TMIN, sum))+ geom_line()+ylab("Number of rainy days")
+
+```
+
+&nbsp;
+
+&nbsp;
+
+
+
+
+
+We notice that the data follows approximately a normal distribution centered around ~ 42.
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+
+
+Third, The maximum tempreture versus the number of rainy days:
+&nbsp;
+
+
+```{r TMAX, echo=FALSE}
+train_set %>% group_by(TMAX) %>%
+  summarize(sum = sum(RAIN)) %>%
+  ggplot(aes(TMAX, sum))+ geom_line()+ylab("Number of rainy days") 
+
+```
+
+&nbsp;
+
+&nbsp;
+
+
+
+
+
+We notice that the data follows approximately a normal distribution centered around ~ 52.
+
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+
+
+
+
+Finally, Let's get an idea of the distribution of classes based on 
+both TMIN and TMAX:
+&nbsp;
+
+
+```{r temp, echo = FALSE}
+train_set %>% 
+  ggplot(aes(TMAX, TMIN, color = Rained))+ geom_point()
+
+```
+
+&nbsp;
+
+&nbsp;
+
+
+
+
+We notice here that there are clusters of rainy and not-rainy days present in the graph, although they are not perfect. But, a line would not seperate them in a good way so I will not try linear regression.
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+&nbsp;
+
+
+
+
+### Trying different classification algorithms
+
+Trying different classification algorithms to predict whether it rained or not based on TMAX, TMIN, and month:
+
+#### KNN nearest neighborhoods
+
+After tuning k value with odd numbers from 121 to 221,
+
+```{r trainknn}
+fit_knn <-   train(Rained ~ TMAX+TMIN+month, method = "knn",
+                    data = train_set,
+                    tuneGrid = data.frame(k = seq(101,171,2)))
+
+```
+
+We see that the Accuracy beaked at k :
+
+```{r kplot, echo =FALSE}
+ggplot(fit_knn, highlight = TRUE)
+
+```
+
+best k is:
+
+```{r bestk}
+fit_knn$bestTune$k
+
+```
+
+with Accuracy equals:
+
+```{r acknn}
+max(fit_knn$results$Accuracy)
+
+```
+
+Now, let's predict classes of the test data set using our model:
+
+```{r predictknn}
+y_hat_knn <- predict(fit_knn, test_set, type="raw")
+
+```
+
+After comparing our predictions to the actual values, we obtain  an accuracy of:
+
+```{r packnn}
+cmknn <- confusionMatrix(y_hat_knn, factor(test_set$Rained))
+cmknn$overall["Accuracy"]
+
+```
+
+#### Regression tree algorithm:
+
+After tuning cp value with 25 numbers between 0 to 0.05,
+
+```{r trainrgt}
+fit_rpart <-   train(Rained ~ TMAX+TMIN+month, 
+                     method = "rpart",
+                     tuneGrid = data.frame(cp = seq(0, 0.05, len = 25)),
+                     data = train_set)
+
+```
+
+We see that the Accuracy beaked at cp :
+
+```{r cpplot, echo =FALSE}
+plot(fit_rpart)
+
+```
+
+best cp is:
+
+```{r bestcp}
+fit_rpart$bestTune$cp
+
+```
+
+with Accuracy equals:
+
+```{r acrgt}
+max(fit_rpart$results$Accuracy)
+
+```
+
+We notice from examining predictors importance that TMAX and TMIN are far more important than the month in the tree, possibly because months are highly correlated with temperature values:
+
+```{r varimp}
+fit_rpart$finalModel$variable.importance
+```
+
+
+A visualization of the final tree:
+
+```{r tree1}
+plot(fit_rpart$finalModel, margin = 0.02)
+text(fit_rpart$finalModel, cex = 0.5)
+```
+
+Now, let's predict classes of the test data set using our model:
+
+```{r predictrgt}
+y_hat_rpart <- predict(fit_rpart, test_set, type="raw")
+
+```
+
+After comparing our predictions to the actual classes, we obtain  an accuracy of:
+
+```{r pacrgt}
+cmrp <- confusionMatrix(y_hat_rpart, factor(test_set$Rained))
+cmrp$overall["Accuracy"]
+
+```
+
+
+#### Random forest model
+
+We begin by training the model, setting the seed to 1999 so the numbers are reproducable:
+
+```{r trainrf, message=FALSE}
+suppressWarnings(set.seed(1999, sample.kind = "Rounding"))
+fit_rf <- train(Rained ~ TMAX+TMIN+month,
+                method = "rf",
+                data = train_set)
+
+```
+
+
+The Accuracy of the model equals:
+
+```{r acrf}
+max(fit_rf$results$Accuracy)
+```
+
+Now, let's predict classes of the test data set using our model:
+
+```{r predictrf}
+y_hat_rf <- predict(fit_rf, test_set, type="raw")
+
+```
+
+By comparing our predictions to the actual values, we obtain  an accuracy of:
+
+```{r pacrf}
+cmrf <- confusionMatrix(y_hat_rf, factor(test_set$Rained))
+cmrf$overall["Accuracy"]
+
+```
+
+
+
+## Results
+
+We see from above that the sorting of accuracies is as follows:
+KNN > Regression tree > Random forest.
+
+In the beginning, we justified the model with the highest Accuracy is the best. Our highest Accuracy is ~ 0.765 produced by the KNN model.
+
+But, it is worth mentioning that the KNN model took much more time to tune and run than the regression tree model, while it only improved Accuracy by around 0.6%.
+
+The random forest model produced the lowest acuracy and took the longest time to run.
+
+
+
+## Conclusion
+
+To conclude, this report aims to build a classification machine algorithm model to predict whether it will rain in Seattle or not based on expected TMAX, TMIN, and date (month of the year).
+
+After trying several classification algorithms, KNN produced the best Accuracy.
+
+Possible points to consider to improve results since the Accuracy of 76.5% is not very hight:
+
+- Looking for additional predictors like humidity.
+- Tuning the random forest model, which is beyond the computational capabilities of my computer.
+- Using more advanced machine learning algorithms.
+
+I hope you enjoyed the report. I am looking forward to the feedback.
+
